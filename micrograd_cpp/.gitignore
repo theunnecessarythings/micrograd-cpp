@@ -1,0 +1,21 @@
+# Ignore CMake build directory
+build/
+
+# Ignore other common build outputs and caches
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# Ignore IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore OS specific files
+.DS_Store
+Thumbs.db
