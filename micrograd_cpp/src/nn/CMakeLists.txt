@@ -2,6 +2,9 @@ set(NN_SOURCES
     Linear.cpp
     ReLU.cpp
     Sigmoid.cpp
+    Embedding.cpp
+    LayerNorm.cpp
+    RMSNorm.cpp
 )
 
 # Using STATIC library for nn module as it's likely to be small and specific to this project

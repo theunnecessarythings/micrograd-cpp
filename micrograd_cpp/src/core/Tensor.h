@@ -68,6 +68,13 @@ public:
 
     std::shared_ptr<Tensor> transpose() const; // For 2D tensors (matrices)
 
+    // Statistical methods
+    std::shared_ptr<Value> sum_all() const; // Sum of all elements in the tensor
+    std::shared_ptr<Value> mean_all() const; // Mean of all elements
+    std::shared_ptr<Value> var_all(bool unbiased = true) const; // Variance of all elements
+    std::shared_ptr<Tensor> sqrt_elem() const; // Element-wise sqrt
+    std::shared_ptr<Tensor> rsqrt_elem() const; // Element-wise reciprocal sqrt: 1/sqrt(x)
+
 private:
     int get_flattened_index(const std::vector<int>& indices) const;
     bool check_shape_compatibility(const std::shared_ptr<Tensor>& other, bool broadcast = false) const;

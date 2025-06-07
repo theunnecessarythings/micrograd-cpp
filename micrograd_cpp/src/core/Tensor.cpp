@@ -413,3 +413,88 @@ std::shared_ptr<Tensor> Tensor::transpose() const {
     }
     return transposed_tensor;
 }
+
+// --- Statistical methods & element-wise math ---
+std::shared_ptr<Value> Tensor::sum_all() const {
+    if (data.empty()) return std::make_shared<Value>(0.0f, "sum_empty_tensor");
+    // Summing Value objects will build a computation graph.
+    auto current_sum = std::make_shared<Value>(0.0f, "sum_init");
+    for (const auto& val_ptr : data) {
+        if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during sum_all.");
+        current_sum = current_sum + val_ptr;
+    }
+    current_sum->op = "sum_all";
+    return current_sum;
+}
+
+std::shared_ptr<Value> Tensor::mean_all() const {
+    if (data.empty()) return std::make_shared<Value>(0.0f, "mean_empty_tensor");
+    int N = numel();
+    if (N == 0) return std::make_shared<Value>(0.0f, "mean_zero_numel_tensor"); // Should ideally not happen if data is not empty
+
+    auto s = this->sum_all();
+    s->op = "mean_sum_part"; // Rename op for clarity in graph if s was from sum_all()
+    auto result = s / std::make_shared<Value>(static_cast<float>(N), "mean_N");
+    result->op = "mean_all";
+    return result;
+}
+
+std::shared_ptr<Value> Tensor::var_all(bool unbiased) const {
+    int N = numel();
+    if (data.empty() || (unbiased && N < 2) || N == 0) {
+        return std::make_shared<Value>(0.0f, "var_insufficient_data");
+    }
+
+    auto m = this->mean_all();
+    m->op = "var_mean_part";
+
+    auto sum_sq_diff = std::make_shared<Value>(0.0f, "var_sum_sq_diff_init");
+    for (const auto& val_ptr : data) {
+        if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during var_all.");
+        auto diff = val_ptr - m;
+        diff->op = "var_diff";
+        auto diff_sq = diff * diff;
+        diff_sq->op = "var_diff_sq";
+        sum_sq_diff = sum_sq_diff + diff_sq;
+    }
+    sum_sq_diff->op = "var_sum_sq_diff";
+
+    float divisor_val = static_cast<float>(unbiased ? (N - 1) : N);
+    if (divisor_val == 0) return std::make_shared<Value>(0.0f, "var_zero_divisor"); // Should be caught by N<2 for unbiased
+
+    auto result = sum_sq_diff / std::make_shared<Value>(divisor_val, "var_N_divisor");
+    result->op = "var_all";
+    return result;
+}
+
+std::shared_ptr<Tensor> Tensor::sqrt_elem() const {
+    std::vector<std::shared_ptr<Value>> result_data;
+    result_data.reserve(numel());
+    for (const auto& val_ptr : data) {
+        if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during sqrt_elem.");
+        result_data.push_back(val_ptr->pow(0.5f));
+    }
+    return std::make_shared<Tensor>(shape, result_data);
+}
+
+std::shared_ptr<Tensor> Tensor::rsqrt_elem() const { // 1/sqrt(x)
+    std::vector<std::shared_ptr<Value>> result_data;
+    result_data.reserve(numel());
+    // Using a small epsilon for numerical stability with rsqrt, common in LayerNorm
+    // Note: PyTorch LayerNorm applies eps to variance *before* sqrt.
+    // Here, this is an element-wise rsqrt, so eps might be added to each element.
+    // For LayerNorm specifically, the (var + eps).pow(-0.5) approach is better.
+    // This rsqrt_elem is a general utility.
+    // float epsilon = 1e-9f; // A very small epsilon to avoid sqrt(0) if not handled by pow or Value directly.
+                          // However, Value::pow should handle negative inputs if necessary (e.g. return NaN or throw).
+                          // And 1/0 is handled by Value division.
+                          // Let's assume x is non-negative for typical rsqrt usage.
+
+    for (const auto& val_ptr : data) {
+        if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during rsqrt_elem.");
+        // auto val_plus_eps = val_ptr + std::make_shared<Value>(epsilon); // if epsilon needed here
+        auto sqrt_val = val_ptr->pow(0.5f);
+        result_data.push_back(std::make_shared<Value>(1.0f, "rsqrt_one") / sqrt_val);
+    }
+    return std::make_shared<Tensor>(shape, result_data);
+}

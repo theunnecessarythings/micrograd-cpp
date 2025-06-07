@@ -20,8 +20,8 @@ FetchContent_MakeAvailable(googletest)
 
 # Add subdirectories for source files
 add_subdirectory(src/core)
-add_subdirectory(src/nn) # Will be enabled later
-# add_subdirectory(src/optim) # Will be enabled later
+add_subdirectory(src/nn)
+add_subdirectory(src/optim) # Will be enabled later
 
 # Enable testing
 enable_testing()
