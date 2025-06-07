@@ -1,5 +1,6 @@
 set(OPTIM_SOURCES
     SGD.cpp
+    Adam.cpp
 )
 
 add_library(micrograd_optim STATIC ${OPTIM_SOURCES})

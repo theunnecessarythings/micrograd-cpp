@@ -39,6 +39,8 @@ public:
     // Activation functions
     std::shared_ptr<Value> relu();
     std::shared_ptr<Value> sigmoid();
+    std::shared_ptr<Value> exp();  // Exponential function
+    std::shared_ptr<Value> log();  // Natural logarithm
     // Sigmoid and tanh can be added later if needed
 
     // Backward pass

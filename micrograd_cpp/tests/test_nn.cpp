@@ -5,8 +5,9 @@
 #include "nn/Linear.h"
 #include "nn/ReLU.h"
 #include "nn/Sigmoid.h"
-#include "nn/Embedding.h" // Added
-#include "nn/LayerNorm.h" // Added
+#include "nn/Embedding.h"
+#include "nn/LayerNorm.h"
+#include "nn/RMSNorm.h"   // Added
 #include <memory> // For std::make_shared
 #include <vector>
 #include <cmath> // For std::exp, std::fabs
@@ -326,6 +327,70 @@ TEST(NNLayerTest, LayerNormBackward) {
 TEST(NNLayerTest, LayerNormParameters) {
     auto ln_layer = std::make_shared<LayerNorm>(10); // 10 features
     EXPECT_EQ(ln_layer->parameters().size(), 10 + 10); // 10 gamma + 10 beta
+}
+
+// --- RMSNorm Layer Tests ---
+TEST(NNLayerTest, RMSNormForwardValues) {
+    int feature_dim = 3;
+    auto rms_layer = std::make_shared<RMSNorm>(feature_dim, 1e-5f); // eps=1e-5
+    // Manually set gamma
+    rms_layer->gamma = Tensor::from_vector({1.0f, 1.5f, 0.5f}, {feature_dim});
+
+    // Input: [[1, 2, 3]]
+    auto input = Tensor::from_vector({1.0f, 2.0f, 3.0f}, {1, feature_dim});
+    auto output = rms_layer->forward(input);
+
+    // Calculations for input [1,2,3]:
+    // x_sq = [1, 4, 9]
+    // mean(x_sq) = (1+4+9)/3 = 14/3 = 4.666666...
+    // rsqrt_val = 1 / sqrt(mean(x_sq) + eps) = 1 / sqrt(4.666666 + 1e-5) = 1 / sqrt(4.666676)
+    //           = 1 / 2.160249 = 0.462910
+    // Normalized_x (before gamma):
+    // x_norm_0 = 1 * 0.462910 = 0.462910
+    // x_norm_1 = 2 * 0.462910 = 0.925820
+    // x_norm_2 = 3 * 0.462910 = 1.388730
+    // Output: gamma * normalized_x
+    // y0 = 1.0 * 0.462910 = 0.462910
+    // y1 = 1.5 * 0.925820 = 1.388730
+    // y2 = 0.5 * 1.388730 = 0.694365
+    std::vector<float> expected_data = {0.462910f, 1.388730f, 0.694365f};
+    check_tensor_data(output, expected_data, 1e-5f);
+}
+
+TEST(NNLayerTest, RMSNormBackward) {
+    int feature_dim = 2;
+    auto rms_layer = std::make_shared<RMSNorm>(feature_dim, 1e-5f);
+    // gamma = [g1,g2] = [1.0, 1.0] for simplicity in checking input grads
+    rms_layer->gamma = Tensor::from_vector({1.0f, 1.0f}, {feature_dim});
+
+    auto x1_val = std::make_shared<Value>(1.0f);
+    auto x2_val = std::make_shared<Value>(3.0f); // Input: [[1.0, 3.0]]
+    auto input_tensor = Tensor::from_values({x1_val, x2_val}, {1, feature_dim});
+
+    auto output_tensor = rms_layer->forward(input_tensor);
+    // x_sq = [1, 9], mean(x_sq) = (1+9)/2 = 5
+    // rsqrt_val = 1/sqrt(5+1e-5) approx 1/sqrt(5.00001) = 1/2.236071 = 0.447213
+    // norm_x1 = 1 * 0.447213 = 0.447213
+    // norm_x2 = 3 * 0.447213 = 1.341639
+    // y1 = 1.0 * 0.447213 = 0.447213
+    // y2 = 1.0 * 1.341639 = 1.341639
+
+    // Loss = y1 + y2 = 0.447213 + 1.341639 = 1.788852
+    auto loss = output_tensor->get({0,0}) + output_tensor->get({0,1});
+    loss->backward();
+
+    // Gradients are complex. Check they are non-zero.
+    // dL/dg1, dL/dg2
+    EXPECT_NE(rms_layer->gamma->get({0})->grad, 0.0f);
+    EXPECT_NE(rms_layer->gamma->get({1})->grad, 0.0f);
+    // dL/dx1, dL/dx2
+    EXPECT_NE(x1_val->grad, 0.0f);
+    EXPECT_NE(x2_val->grad, 0.0f);
+}
+
+TEST(NNLayerTest, RMSNormParameters) {
+    auto rms_layer = std::make_shared<RMSNorm>(20); // 20 features
+    EXPECT_EQ(rms_layer->parameters().size(), 20); // Only gamma parameters
 }
 
 

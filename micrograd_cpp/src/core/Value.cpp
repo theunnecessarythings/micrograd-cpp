@@ -34,6 +34,35 @@ std::shared_ptr<Value> Value::operator+(const std::shared_ptr<Value>& other) {
     return out;
 }
 
+std::shared_ptr<Value> Value::exp() {
+    auto self = shared_from_this();
+    float e_x = std::exp(self->data);
+    auto out = std::make_shared<Value>(e_x, "exp", std::set<std::shared_ptr<Value>>{self});
+
+    out->_backward = [self, out, e_x]() {
+        // Gradient of exp(x) is exp(x)
+        self->grad += e_x * out->grad;
+    };
+    return out;
+}
+
+std::shared_ptr<Value> Value::log() {
+    auto self = shared_from_this();
+    if (self->data <= 0) {
+        // Log is undefined for non-positive values.
+        throw std::runtime_error("Logarithm undefined for non-positive value: " + std::to_string(self->data));
+    }
+    float log_x = std::log(self->data);
+    auto out = std::make_shared<Value>(log_x, "log", std::set<std::shared_ptr<Value>>{self});
+
+    out->_backward = [self, out]() {
+        // Gradient of log(x) is 1/x
+        float grad_val = (self->data == 0.0f) ? 0.0f : (1.0f / self->data); // Avoid div by zero strictly
+        self->grad += grad_val * out->grad;
+    };
+    return out;
+}
+
 std::shared_ptr<Value> Value::operator-(const std::shared_ptr<Value>& other) {
     auto self = shared_from_this();
     auto out = std::make_shared<Value>(self->data - other->data, "-", std::set<std::shared_ptr<Value>>{self, other});
@@ -116,6 +145,7 @@ void Value::backward() {
 }
 
 // Implementations for free function operators
+// (exp and log should be before this block)
 std::shared_ptr<Value> operator+(const std::shared_ptr<Value>& lhs, const std::shared_ptr<Value>& rhs) {
     return lhs->operator+(rhs);
 }

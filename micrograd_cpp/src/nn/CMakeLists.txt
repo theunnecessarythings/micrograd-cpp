@@ -5,6 +5,8 @@ set(NN_SOURCES
     Embedding.cpp
     LayerNorm.cpp
     RMSNorm.cpp
+    losses.cpp
+    metrics.cpp
 )
 
 # Using STATIC library for nn module as it's likely to be small and specific to this project

@@ -10,12 +10,22 @@ add_executable(tensor_tests test_tensor.cpp)
 target_link_libraries(tensor_tests PRIVATE GTest::gtest_main micrograd_core)
 gtest_discover_tests(tensor_tests)
 
-# NN Layer tests (Embedding, LayerNorm tests are added to test_nn.cpp)
+# NN Layer tests (Embedding, LayerNorm, RMSNorm tests are added to test_nn.cpp)
 add_executable(nn_layer_tests test_nn.cpp)
 target_link_libraries(nn_layer_tests PRIVATE GTest::gtest_main micrograd_core micrograd_nn)
 gtest_discover_tests(nn_layer_tests)
 
 # Optimizer tests
 add_executable(optimizer_tests test_optim.cpp)
-target_link_libraries(optimizer_tests PRIVATE GTest::gtest_main micrograd_core micrograd_optim) # Link to micrograd_optim
+target_link_libraries(optimizer_tests PRIVATE GTest::gtest_main micrograd_core micrograd_optim)
 gtest_discover_tests(optimizer_tests)
+
+# Losses tests
+add_executable(losses_tests test_losses.cpp)
+target_link_libraries(losses_tests PRIVATE GTest::gtest_main micrograd_core micrograd_nn) # Losses use Tensor/Value from core
+gtest_discover_tests(losses_tests)
+
+# Trainer tests
+add_executable(trainer_tests test_train.cpp)
+target_link_libraries(trainer_tests PRIVATE GTest::gtest_main micrograd_core micrograd_nn micrograd_optim micrograd_train)
+gtest_discover_tests(trainer_tests)
