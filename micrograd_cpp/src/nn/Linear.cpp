@@ -29,58 +29,69 @@ std::shared_ptr<Tensor> Linear::forward(const std::shared_ptr<Tensor>& input) {
         throw std::runtime_error("Linear::forward: Weights tensor is null.");
     }
 
-    // Input validation (shape check)
-    if (!((input->ndim() == 1 && input->shape[0] == input_features) ||
-          (input->ndim() == 2 && input->shape[1] == input_features))) {
-        std::string shape_str = "(";
+    // Input validation
+    if (input->ndim() == 0 || input->shape.back() != input_features) {
+         std::string shape_str = "(";
         for(size_t i=0; i<input->shape.size(); ++i) shape_str += std::to_string(input->shape[i]) + (i == input->shape.size()-1 ? "" : ", ");
         shape_str += ")";
-        throw std::runtime_error("Linear::forward: Input tensor shape mismatch. Expected [N, " + std::to_string(input_features) + "] or [" + std::to_string(input_features) + "]. Got " + std::to_string(input->ndim()) + "D tensor with shape " + shape_str);
+        throw std::runtime_error("Linear::forward: Last dimension of input tensor (" + std::to_string(input->shape.back()) +
+                                 ") must match input_features (" + std::to_string(input_features) +
+                                 "). Input shape: " + shape_str);
     }
 
-    std::shared_ptr<Tensor> input_reshaped = input;
-    bool single_input_vector = false;
-    if (input->ndim() == 1) {
-        // Reshape [in_features] to [1, in_features]
-        // Ensure data vector from input is valid before creating new tensor from it
-        if(input->data.empty() && input_features > 0) {
-            throw std::runtime_error("Linear::forward: Input vector is empty but input_features > 0.");
+    std::vector<int> original_shape = input->shape;
+    bool was_1d = false;
+    std::shared_ptr<Tensor> input_2d = input;
+
+    if (input->ndim() == 1) { // [F_in]
+        was_1d = true;
+        input_2d = input->reshape({1, input_features}); // Reshape to [1, F_in]
+    } else if (input->ndim() > 2) { // [B, S1, S2, ..., F_in]
+        // Reshape to [B*S1*S2*..., F_in]
+        int batch_dims_prod = 1;
+        for (size_t i = 0; i < original_shape.size() - 1; ++i) {
+            batch_dims_prod *= original_shape[i];
         }
-        input_reshaped = Tensor::from_values(input->data, {1, input_features});
-        single_input_vector = true;
+        input_2d = input->reshape({batch_dims_prod, input_features});
     }
+    // If input->ndim() == 2, input_2d is already [B, F_in]
 
     // W is [out_features, in_features]. W.T is [in_features, out_features]
-    auto weights_t = weights->transpose(); // Use the new Tensor method
-    auto output = input_reshaped->matmul(weights_t); // [N, in] @ [in, out] -> [N, out]
+    auto weights_t = weights->transpose();
+    auto output_2d = input_2d->matmul(weights_t); // [B*S*.., F_in] @ [F_in, F_out] -> [B*S*.., F_out]
 
     if (has_bias) {
         if (!bias) {
             throw std::runtime_error("Linear::forward: Bias is enabled but bias tensor is null.");
         }
-        // output is [N, out_features], bias is [out_features] (1D)
-        // We need broadcasting addition: output_ij = output_ij + bias_j
-        if (output->shape[1] != bias->shape[0]) {
-             throw std::runtime_error("Bias shape mismatch during addition. Output cols: " + std::to_string(output->shape[1]) + ", Bias size: " + std::to_string(bias->shape[0]));
+        // output_2d is [B_eff, F_out], bias is [F_out] (1D)
+        // Broadcasting addition: output_ij = output_ij + bias_j
+        if (output_2d->shape[1] != bias->shape[0]) {
+             throw std::runtime_error("Bias shape mismatch during addition. Output cols: " + std::to_string(output_2d->shape[1]) + ", Bias size: " + std::to_string(bias->shape[0]));
         }
         std::vector<std::shared_ptr<Value>> result_data;
-        result_data.reserve(output->numel());
-        for (int n = 0; n < output->shape[0]; ++n) { // Batch dimension (N)
-            for (int o = 0; o < output->shape[1]; ++o) { // Output features dimension
-                result_data.push_back(output->get({n, o}) + bias->get({o}));
+        result_data.reserve(output_2d->numel());
+        for (int n = 0; n < output_2d->shape[0]; ++n) { // Effective batch dimension
+            for (int o = 0; o < output_2d->shape[1]; ++o) { // Output features dimension
+                result_data.push_back(output_2d->get({n, o}) + bias->get({o}));
             }
         }
-        output = Tensor::from_values(result_data, output->shape);
+        output_2d = Tensor::from_values(result_data, output_2d->shape);
     }
 
-    if (single_input_vector) {
-        // Reshape output from [1, out_features] back to [out_features]
-        if(output->data.empty() && output_features > 0) {
-             throw std::runtime_error("Linear::forward: Output vector is empty but output_features > 0 before final reshape.");
+    // Reshape back to original ndim if necessary
+    if (was_1d) { // Input was [F_in], output should be [F_out]
+        return output_2d->reshape({output_features});
+    } else if (input->ndim() > 2) { // Input was [B, S1,..., F_in], output should be [B, S1,..., F_out]
+        std::vector<int> final_output_shape;
+        for (size_t i = 0; i < original_shape.size() - 1; ++i) {
+            final_output_shape.push_back(original_shape[i]);
         }
-        return Tensor::from_values(output->data, {output_features});
+        final_output_shape.push_back(output_features);
+        return output_2d->reshape(final_output_shape);
     }
-    return output;
+
+    return output_2d; // Input was 2D, output is 2D
 }
 
 std::vector<std::shared_ptr<Value>> Linear::parameters() const {

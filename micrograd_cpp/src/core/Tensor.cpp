@@ -309,6 +309,16 @@ std::shared_ptr<Tensor> Tensor::log_elem() const {
     return std::make_shared<Tensor>(shape, result_data);
 }
 
+std::shared_ptr<Tensor> Tensor::tanh_elem() const {
+    std::vector<std::shared_ptr<Value>> result_data;
+    result_data.reserve(this->numel());
+    for (const auto& val_ptr : data) {
+        if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during tanh_elem operation.");
+        result_data.push_back(val_ptr->tanh());
+    }
+    return std::make_shared<Tensor>(this->shape, result_data);
+}
+
 std::shared_ptr<Tensor> Tensor::sqrt_elem() const {
     std::vector<std::shared_ptr<Value>> result_data;
     result_data.reserve(numel());
@@ -560,6 +570,47 @@ std::shared_ptr<Tensor> Tensor::permute(const std::vector<int>& axes_order) cons
     }
 
     return std::make_shared<Tensor>(new_shape, new_data);
+}
+
+std::shared_ptr<Tensor> Tensor::reshape(const std::vector<int>& new_shape) const {
+    long new_calculated_numel = 1;
+    if (new_shape.empty()){
+        new_calculated_numel = 1; // Scalar has 1 element
+    } else {
+        for (int dim : new_shape) {
+            if (dim <= 0) { // Note: Some frameworks allow -1 for one dim to be inferred. Not implemented here.
+                throw std::invalid_argument("Reshape: Dimensions in new_shape must be positive. Got " + std::to_string(dim));
+            }
+            new_calculated_numel *= dim;
+        }
+    }
+
+    long current_numel_val = this->numel(); // numel() should correctly return 1 for scalar this.
+
+    if (new_calculated_numel != current_numel_val) {
+        std::string current_shape_str, new_shape_str;
+        // Helper to format shape for error message
+        auto format_shape = [](const std::vector<int>& s) {
+            std::string res = "{";
+            for(size_t i=0; i<s.size(); ++i) res += std::to_string(s[i]) + (i==s.size()-1 ? "" : ",");
+            res += "}";
+            return res;
+        };
+        current_shape_str = format_shape(this->shape);
+        new_shape_str = format_shape(new_shape);
+
+        throw std::runtime_error("Reshape: Total number of elements must remain the same. Current shape " +
+                                 current_shape_str + " (numel " + std::to_string(current_numel_val) +
+                                 ") cannot be reshaped to " + new_shape_str + " (numel " +
+                                 std::to_string(new_calculated_numel) + ")");
+    }
+
+    // Create a new tensor with the new shape but share the same Value object(s).
+    // The order of Value objects in the `data` vector remains unchanged.
+    // The interpretation of this flat data is what changes due to the new shape.
+    // The constructor Tensor(const std::vector<int>& shape, const std::vector<std::shared_ptr<Value>>& initial_values)
+    // will use the new_shape and the existing data.
+    return std::make_shared<Tensor>(new_shape, this->data);
 }
 
 // --- Backward pass ---

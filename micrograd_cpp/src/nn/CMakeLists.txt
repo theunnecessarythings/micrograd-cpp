@@ -11,6 +11,8 @@ set(NN_SOURCES
     Conv1D.cpp
     attention.cpp
     MultiHeadAttention.cpp
+    Dropout.cpp
+    GELU.cpp
 )
 
 # Using STATIC library for nn module as it's likely to be small and specific to this project

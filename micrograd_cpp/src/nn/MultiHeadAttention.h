@@ -28,16 +28,19 @@ public:
     // query, key, value: [batch_size, seq_len, embed_dim]
     // mask: [batch_size, seq_len_q, seq_len_k] (or broadcastable for attention scores)
     // Returns: [batch_size, seq_len_q, embed_dim]
+    // This is the primary forward method for distinct Q, K, V.
     std::shared_ptr<Tensor> forward(
         const std::shared_ptr<Tensor>& query,
         const std::shared_ptr<Tensor>& key,
         const std::shared_ptr<Tensor>& value,
         const std::shared_ptr<Tensor>& mask = nullptr);
 
-    // Overload for self-attention where Q, K, V are the same
-    std::shared_ptr<Tensor> forward(
-        const std::shared_ptr<Tensor>& x,
-        const std::shared_ptr<Tensor>& mask = nullptr);
+    // This overrides Layer::forward and implements self-attention by default.
+    // A mask can be passed if needed, but Layer::forward doesn't have it.
+    // To handle masks with self-attention, one might call the QKV version directly: model->forward(x,x,x,mask).
+    // Or, this method could be more complex if we want to pass optional mask through Layer::forward.
+    // For now, self-attention via Layer::forward won't take a mask directly.
+    std::shared_ptr<Tensor> forward(const std::shared_ptr<Tensor>& x) override;
 
 
     std::vector<std::shared_ptr<Value>> parameters() const override;
