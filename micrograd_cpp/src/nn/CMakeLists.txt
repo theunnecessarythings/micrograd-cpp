@@ -9,6 +9,8 @@ set(NN_SOURCES
     metrics.cpp
     Conv2D.cpp
     Conv1D.cpp
+    attention.cpp
+    MultiHeadAttention.cpp
 )
 
 # Using STATIC library for nn module as it's likely to be small and specific to this project

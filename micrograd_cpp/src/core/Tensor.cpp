@@ -6,7 +6,7 @@
 
 // --- Constructors ---
 Tensor::Tensor(const std::vector<int>& shape, bool requires_grad) : shape(shape) {
-    int total_elements = numel();
+    int total_elements = numel(); // numel() now returns 1 for shape {} due to scalar fix
     data.reserve(total_elements);
     for (int i = 0; i < total_elements; ++i) {
         data.push_back(std::make_shared<Value>(0.0f, "Value_from_Tensor_zeros"));
@@ -14,9 +14,10 @@ Tensor::Tensor(const std::vector<int>& shape, bool requires_grad) : shape(shape)
 }
 
 Tensor::Tensor(const std::vector<int>& shape, const std::vector<float>& initial_data, bool requires_grad) : shape(shape) {
-    int total_elements = numel();
+    int total_elements = numel(); // Uses updated numel
     if (initial_data.size() != static_cast<size_t>(total_elements)) {
-        throw std::runtime_error("Initial data size does not match tensor shape. Expected: " + std::to_string(total_elements) + ", Got: " + std::to_string(initial_data.size()));
+        throw std::runtime_error("Initial data size (" + std::to_string(initial_data.size()) +
+                                 ") does not match tensor shape numel (" + std::to_string(total_elements) + ").");
     }
     data.reserve(total_elements);
     for (float val : initial_data) {
@@ -25,9 +26,10 @@ Tensor::Tensor(const std::vector<int>& shape, const std::vector<float>& initial_
 }
 
 Tensor::Tensor(const std::vector<int>& shape, const std::vector<std::shared_ptr<Value>>& initial_values) : shape(shape) {
-    int total_elements = numel();
+    int total_elements = numel(); // Uses updated numel
     if (initial_values.size() != static_cast<size_t>(total_elements)) {
-        throw std::runtime_error("Initial values size does not match tensor shape. Expected: " + std::to_string(total_elements) + ", Got: " + std::to_string(initial_values.size()));
+        throw std::runtime_error("Initial values size (" + std::to_string(initial_values.size()) +
+                                 ") does not match tensor shape numel (" + std::to_string(total_elements) + ").");
     }
     data = initial_values;
 }
@@ -38,37 +40,36 @@ std::shared_ptr<Tensor> Tensor::zeros(const std::vector<int>& shape, bool requir
 }
 
 std::shared_ptr<Tensor> Tensor::ones(const std::vector<int>& shape, bool requires_grad) {
-    auto tensor = std::make_shared<Tensor>(shape, requires_grad);
-    for (auto& val_ptr : tensor->data) {
-        val_ptr->data = 1.0f;
-        val_ptr->op = "Value_from_Tensor_ones";
+    auto tensor = std::make_shared<Tensor>(shape, requires_grad); // Will init with 0s
+    for (auto& val_ptr : tensor->data) { // Then set to 1.0
+        if(val_ptr) val_ptr->data = 1.0f;
+        if(val_ptr) val_ptr->op = "Value_from_Tensor_ones";
     }
     return tensor;
 }
 
 std::shared_ptr<Tensor> Tensor::randn(const std::vector<int>& shape, bool requires_grad) {
-    auto tensor = std::make_shared<Tensor>(shape, requires_grad);
+    auto tensor = std::make_shared<Tensor>(shape, requires_grad); // Will init with 0s
     std::default_random_engine generator(std::random_device{}());
     std::normal_distribution<float> distribution(0.0, 1.0);
-    for (auto& val_ptr : tensor->data) {
-        val_ptr->data = distribution(generator);
-        val_ptr->op = "Value_from_Tensor_randn";
+    for (auto& val_ptr : tensor->data) { // Then set to random
+        if(val_ptr) val_ptr->data = distribution(generator);
+        if(val_ptr) val_ptr->op = "Value_from_Tensor_randn";
     }
     return tensor;
 }
 
 std::shared_ptr<Tensor> Tensor::from_vector(const std::vector<float>& vec_data, const std::vector<int>& shape, bool requires_grad) {
     long int calculated_numel;
-    if (shape.empty()) { // Scalar case
-        calculated_numel = 1;
-    } else { // Non-scalar case
+    if (shape.empty()) {
+        calculated_numel = 1; // Scalar
+    } else {
         calculated_numel = 1;
         for (int dim : shape) {
             if (dim <= 0) throw std::runtime_error("Dimension must be positive for non-scalar tensor.");
             calculated_numel *= dim;
         }
     }
-
     if (vec_data.size() != static_cast<size_t>(calculated_numel)) {
         throw std::runtime_error("Data size (" + std::to_string(vec_data.size()) +
                                  ") does not match number of elements expected by shape (" + std::to_string(calculated_numel) + ").");
@@ -78,16 +79,15 @@ std::shared_ptr<Tensor> Tensor::from_vector(const std::vector<float>& vec_data, 
 
 std::shared_ptr<Tensor> Tensor::from_values(const std::vector<std::shared_ptr<Value>>& values, const std::vector<int>& shape) {
     long int calculated_numel;
-     if (shape.empty()) { // Scalar case
-        calculated_numel = 1;
-    } else { // Non-scalar case
+     if (shape.empty()) {
+        calculated_numel = 1; // Scalar
+    } else {
         calculated_numel = 1;
         for (int dim : shape) {
             if (dim <= 0) throw std::runtime_error("Dimension must be positive for non-scalar tensor.");
             calculated_numel *= dim;
         }
     }
-
     if (values.size() != static_cast<size_t>(calculated_numel)) {
         throw std::runtime_error("Values size (" + std::to_string(values.size()) +
                                  ") does not match number of elements expected by shape (" + std::to_string(calculated_numel) + ").");
@@ -99,15 +99,15 @@ std::shared_ptr<Tensor> Tensor::from_values(const std::vector<std::shared_ptr<Va
 int Tensor::numel() const {
     if (shape.empty()) return 1; // Scalar tensor has 1 element
     for (int dim : shape) {
-        if (dim <= 0) return 0; // Non-scalar tensor with a zero dimension has 0 elements
+        if (dim <= 0) return 0;
     }
     return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
 }
 
 int Tensor::get_flattened_index(const std::vector<int>& indices) const {
-    if (shape.empty()) { // Scalar tensor
+    if (shape.empty()) {
         if (indices.empty() || (indices.size() == 1 && indices[0] == 0)) {
-            return 0; // Accessing the single scalar element
+            return 0;
         } else {
             throw std::out_of_range("Invalid indices for scalar tensor. Expected {} or {0}. Got " + std::to_string(indices.size()) + " indices.");
         }
@@ -133,18 +133,31 @@ int Tensor::get_flattened_index(const std::vector<int>& indices) const {
 }
 
 std::shared_ptr<Value> Tensor::get(const std::vector<int>& indices) const {
-    return data[get_flattened_index(indices)];
+    int flat_idx = get_flattened_index(indices);
+    if (flat_idx < 0 || flat_idx >= static_cast<int>(data.size())) { // Should not happen if get_flattened_index is correct
+        throw std::out_of_range("Calculated flat index " + std::to_string(flat_idx) + " is out of bounds for data size " + std::to_string(data.size()));
+    }
+    return data[flat_idx];
 }
 
 void Tensor::set(const std::vector<int>& indices, const std::shared_ptr<Value>& val) {
-    data[get_flattened_index(indices)] = val;
+    int flat_idx = get_flattened_index(indices);
+     if (flat_idx < 0 || flat_idx >= static_cast<int>(data.size())) {
+        throw std::out_of_range("Calculated flat index " + std::to_string(flat_idx) + " is out of bounds for data size " + std::to_string(data.size()));
+    }
+    data[flat_idx] = val;
 }
 
 void Tensor::set(const std::vector<int>& indices, float val_data) {
-    data[get_flattened_index(indices)] = std::make_shared<Value>(val_data, "Value_from_Tensor_set");
+    int flat_idx = get_flattened_index(indices);
+    if (flat_idx < 0 || flat_idx >= static_cast<int>(data.size())) {
+        throw std::out_of_range("Calculated flat index " + std::to_string(flat_idx) + " is out of bounds for data size " + std::to_string(data.size()));
+    }
+    data[flat_idx] = std::make_shared<Value>(val_data, "Value_from_Tensor_set");
 }
 
 bool Tensor::check_shape_compatibility(const std::shared_ptr<Tensor>& other, bool broadcast) const {
+    if (!other) return false;
     if (this->shape != other->shape) {
         return false;
     }
@@ -176,7 +189,7 @@ std::shared_ptr<Tensor> Tensor::operator-(const std::shared_ptr<Tensor>& other) 
     return std::make_shared<Tensor>(shape, result_data);
 }
 
-std::shared_ptr<Tensor> Tensor::operator*(const std::shared_ptr<Tensor>& other) const { // Element-wise
+std::shared_ptr<Tensor> Tensor::operator*(const std::shared_ptr<Tensor>& other) const {
     if (!check_shape_compatibility(other)) {
         throw std::runtime_error("Tensor shapes are not compatible for element-wise multiplication.");
     }
@@ -189,7 +202,6 @@ std::shared_ptr<Tensor> Tensor::operator*(const std::shared_ptr<Tensor>& other) 
 }
 
 // --- Scalar operations ---
-// ... (scalar ops: +, -, *, / - these were correct in the read_files output) ...
 std::shared_ptr<Tensor> Tensor::operator+(float scalar) const {
     std::vector<std::shared_ptr<Value>> result_data;
     result_data.reserve(numel());
@@ -234,8 +246,8 @@ std::shared_ptr<Tensor> Tensor::operator/(float scalar) const {
 }
 
 // --- Matrix multiplication ---
-// ... (matmul - this was correct in the read_files output) ...
 std::shared_ptr<Tensor> Tensor::matmul(const std::shared_ptr<Tensor>& other) const {
+    if (!other) throw std::runtime_error("Other tensor in matmul is null.");
     if (ndim() != 2 || other->ndim() != 2) {
         throw std::runtime_error("Matrix multiplication currently only supports 2D tensors.");
     }
@@ -257,11 +269,11 @@ std::shared_ptr<Tensor> Tensor::matmul(const std::shared_ptr<Tensor>& other) con
 }
 
 // --- Activation functions & element-wise math ---
-// ... (relu, sigmoid, exp_elem, log_elem, sqrt_elem, rsqrt_elem - these were correct in the read_files output) ...
 std::shared_ptr<Tensor> Tensor::relu() const {
     std::vector<std::shared_ptr<Value>> result_data;
     result_data.reserve(numel());
     for (const auto& val_ptr : data) {
+        if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during relu operation.");
         result_data.push_back(val_ptr->relu());
     }
     return std::make_shared<Tensor>(shape, result_data);
@@ -319,37 +331,65 @@ std::shared_ptr<Tensor> Tensor::rsqrt_elem() const {
 }
 
 // --- More complex operations ---
-// ... (log_softmax - this was correct in the read_files output) ...
 std::shared_ptr<Tensor> Tensor::log_softmax(int axis) const {
-    if (this->ndim() == 0 && this->numel() == 0) return std::make_shared<Tensor>(this->shape, this->data);
-    if (this->ndim() == 0 && this->numel() == 1) {
-        return Tensor::zeros(this->shape);
+    if (this->ndim() == 0 && this->numel() == 1 && shape.empty()) { // Scalar tensor
+        return Tensor::zeros(this->shape); // log(softmax(x)) = log(1) = 0
     }
-    if (axis != -1 && axis != this->ndim() -1) {
-        throw std::runtime_error("log_softmax currently only supports axis=-1 (last dimension). Provided axis: " + std::to_string(axis) + " for ndim: " + std::to_string(this->ndim()));
+    if (this->ndim() == 0 && this->numel() == 0) return std::make_shared<Tensor>(this->shape, this->data); // Empty
+
+    int actual_axis = axis;
+    if (actual_axis < 0) {
+        actual_axis = this->ndim() + actual_axis;
     }
-    if (this->ndim() > 2) {
-        throw std::runtime_error("log_softmax currently only supports 1D or 2D tensors. Got ndim: " + std::to_string(this->ndim()));
+    if (actual_axis < 0 || actual_axis >= this->ndim()) {
+        throw std::out_of_range("LogSoftmax axis " + std::to_string(axis) + " out of range for tensor with ndim " + std::to_string(this->ndim()));
     }
-    if (this->numel() == 0) {
+
+    if (actual_axis != this->ndim() - 1) {
+        throw std::runtime_error("log_softmax currently only supports operation along the last dimension (axis=-1 or ndim-1). Provided axis: " + std::to_string(axis) + " for ndim: " + std::to_string(this->ndim()));
+    }
+     if (this->numel() == 0 && !shape.empty() ) {
          return std::make_shared<Tensor>(this->shape, std::vector<std::shared_ptr<Value>>{});
     }
+
     std::vector<std::shared_ptr<Value>> result_flat_data;
     result_flat_data.reserve(this->numel());
-    int rows = (this->ndim() == 1) ? 1 : this->shape[0];
-    int cols = (this->ndim() == 1) ? this->shape[0] : this->shape[1];
-    for (int i = 0; i < rows; ++i) {
-        std::shared_ptr<Value> max_val = (this->ndim() == 1) ? this->get({0}) : this->get({i,0});
-        for (int j = 1; j < cols; ++j) {
-            auto current_val = (this->ndim() == 1) ? this->get({j}) : this->get({i,j});
+
+    int dim_to_log_softmax = this->shape[actual_axis];
+    if (dim_to_log_softmax == 0) {
+        return std::make_shared<Tensor>(this->shape, std::vector<std::shared_ptr<Value>>{});
+    }
+
+    int instances = 1;
+    for (int i=0; i < actual_axis; ++i) {
+        instances *= this->shape[i];
+    }
+
+    for (int inst = 0; inst < instances; ++inst) {
+        std::vector<int> base_indices(this->ndim());
+        int temp_inst = inst;
+        for(int d = actual_axis - 1; d >= 0; --d) {
+            base_indices[d] = temp_inst % this->shape[d];
+            temp_inst /= this->shape[d];
+        }
+
+        base_indices[actual_axis] = 0;
+        std::shared_ptr<Value> max_val = this->get(base_indices);
+        for (int j = 1; j < dim_to_log_softmax; ++j) {
+            base_indices[actual_axis] = j;
+            auto current_val = this->get(base_indices);
+            if (!current_val || !max_val) throw std::runtime_error("Null value encountered during max_val computation in log_softmax.");
             if (current_val->data > max_val->data) {
                 max_val = current_val;
             }
         }
         max_val->op = "logsoftmax_max";
+
         auto sum_exps_minus_max = std::make_shared<Value>(0.0f, "logsoftmax_sum_exps_init");
-        for (int j = 0; j < cols; ++j) {
-            auto val = (this->ndim() == 1) ? this->get({j}) : this->get({i,j});
+        for (int j = 0; j < dim_to_log_softmax; ++j) {
+            base_indices[actual_axis] = j;
+            auto val = this->get(base_indices);
+            if (!val) throw std::runtime_error("Null value encountered for val in log_softmax.");
             auto x_minus_max = val - max_val;
             x_minus_max->op = "logsoftmax_xminmax";
             auto e = x_minus_max->exp();
@@ -357,10 +397,14 @@ std::shared_ptr<Tensor> Tensor::log_softmax(int axis) const {
             sum_exps_minus_max = sum_exps_minus_max + e;
         }
         sum_exps_minus_max->op = "logsoftmax_sum_exps";
+
         auto log_sum_exps = sum_exps_minus_max->log();
         log_sum_exps->op = "logsoftmax_logsumexp";
-        for (int j = 0; j < cols; ++j) {
-            auto val = (this->ndim() == 1) ? this->get({j}) : this->get({i,j});
+
+        for (int j = 0; j < dim_to_log_softmax; ++j) {
+            base_indices[actual_axis] = j;
+            auto val = this->get(base_indices);
+             if (!val) throw std::runtime_error("Null value encountered for val (second loop) in log_softmax.");
             auto x_minus_max = val - max_val;
             auto log_softmax_j = x_minus_max - log_sum_exps;
             log_softmax_j->op = "logsoftmax_final_val";
@@ -370,10 +414,157 @@ std::shared_ptr<Tensor> Tensor::log_softmax(int axis) const {
     return std::make_shared<Tensor>(this->shape, result_flat_data);
 }
 
+std::shared_ptr<Tensor> Tensor::softmax(int axis) const {
+    if (this->ndim() == 0 && this->numel() == 1 && shape.empty()) { // Scalar tensor
+        auto one_val = std::make_shared<Value>(1.0f, "softmax_scalar");
+        return std::make_shared<Tensor>(this->shape, std::vector<std::shared_ptr<Value>>{one_val});
+    }
+    if (this->ndim() == 0 && this->numel() == 0) return std::make_shared<Tensor>(this->shape, this->data); // Empty
+
+    int actual_axis = axis;
+    if (actual_axis < 0) {
+        actual_axis = this->ndim() + actual_axis;
+    }
+    if (actual_axis < 0 || actual_axis >= this->ndim()) {
+        throw std::out_of_range("Softmax axis " + std::to_string(axis) + " out of range for tensor with ndim " + std::to_string(this->ndim()));
+    }
+
+    if (actual_axis != this->ndim() - 1) {
+        throw std::runtime_error("Softmax currently only supports operation along the last dimension (axis=-1 or ndim-1). Provided axis: " + std::to_string(axis) + " for ndim: " + std::to_string(this->ndim()));
+    }
+     if (this->numel() == 0 && !shape.empty() ) {
+         return std::make_shared<Tensor>(this->shape, std::vector<std::shared_ptr<Value>>{});
+    }
+
+    std::vector<std::shared_ptr<Value>> result_flat_data;
+    result_flat_data.reserve(this->numel());
+
+    int dim_to_softmax = this->shape[actual_axis];
+    if (dim_to_softmax == 0) {
+        return std::make_shared<Tensor>(this->shape, std::vector<std::shared_ptr<Value>>{});
+    }
+
+    int instances = 1;
+    for (int i=0; i < actual_axis; ++i) {
+        instances *= this->shape[i];
+    }
+
+    for (int inst = 0; inst < instances; ++inst) {
+        // Determine multi-dimensional index for the start of this instance's slice
+        std::vector<int> base_indices(this->ndim());
+        int temp_inst = inst;
+        for(int d = actual_axis - 1; d >= 0; --d) {
+            base_indices[d] = temp_inst % this->shape[d];
+            temp_inst /= this->shape[d];
+        }
+
+        // Max trick for numerical stability
+        base_indices[actual_axis] = 0;
+        std::shared_ptr<Value> max_val = this->get(base_indices);
+        for (int j = 1; j < dim_to_softmax; ++j) {
+            base_indices[actual_axis] = j;
+            auto current_val = this->get(base_indices);
+            if (!current_val || !max_val) throw std::runtime_error("Null value encountered during max_val computation in softmax.");
+            if (current_val->data > max_val->data) {
+                max_val = current_val;
+            }
+        }
+        max_val->op = "softmax_max";
+
+        std::vector<std::shared_ptr<Value>> exps;
+        exps.reserve(dim_to_softmax);
+        std::shared_ptr<Value> sum_exps = std::make_shared<Value>(0.0f, "softmax_sum_exps_init");
+
+        for (int j = 0; j < dim_to_softmax; ++j) {
+            base_indices[actual_axis] = j;
+            auto val = this->get(base_indices);
+            if (!val) throw std::runtime_error("Null value encountered for val in softmax.");
+            auto x_minus_max = val - max_val;
+            x_minus_max->op = "softmax_xminmax";
+            auto e = x_minus_max->exp();
+            e->op = "softmax_exp";
+            exps.push_back(e);
+            sum_exps = sum_exps + e;
+        }
+        sum_exps->op = "softmax_sum_exps";
+
+        for (int j = 0; j < dim_to_softmax; ++j) {
+            auto softmax_val = exps[j] / sum_exps;
+            softmax_val->op = "softmax_final_val";
+            result_flat_data.push_back(softmax_val);
+        }
+    }
+    return std::make_shared<Tensor>(this->shape, result_flat_data);
+}
+
+std::shared_ptr<Tensor> Tensor::permute(const std::vector<int>& axes_order) const {
+    if (axes_order.size() != this->ndim()) {
+        throw std::invalid_argument("Permute: axes_order size (" + std::to_string(axes_order.size()) +
+                                    ") must match tensor dimensionality (" + std::to_string(this->ndim()) + ").");
+    }
+    if (this->ndim() == 0 && axes_order.empty()) { // Scalar tensor
+        return std::make_shared<Tensor>(this->shape, this->data); // Permute of a scalar is itself
+    }
+
+
+    std::vector<int> new_shape(this->ndim());
+    std::vector<bool> seen_dims(this->ndim(), false);
+    for (size_t i = 0; i < axes_order.size(); ++i) {
+        int axis = axes_order[i];
+        if (axis < 0 || axis >= this->ndim()) {
+            throw std::out_of_range("Permute: Invalid axis " + std::to_string(axis) +
+                                    " in axes_order for tensor with ndim " + std::to_string(this->ndim()) + ".");
+        }
+        if (seen_dims[axis]) {
+            throw std::invalid_argument("Permute: Duplicate axis " + std::to_string(axis) + " in axes_order.");
+        }
+        new_shape[i] = this->shape[axis];
+        seen_dims[axis] = true;
+    }
+
+    // Ensure all original dimensions were used
+    for(int i=0; i < this->ndim(); ++i) {
+        if(!seen_dims[i]) {
+            throw std::invalid_argument("Permute: axes_order must contain all original dimensions. Missing dimension " + std::to_string(i));
+        }
+    }
+
+    int N = this->numel();
+    std::vector<std::shared_ptr<Value>> new_data(N);
+
+    if (N == 0) { // Handle empty tensor (e.g. shape {2,0,3})
+        return std::make_shared<Tensor>(new_shape, new_data);
+    }
+
+    std::vector<int> current_new_indices(this->ndim());
+    std::vector<int> original_indices(this->ndim());
+
+    for (int i = 0; i < N; ++i) {
+        // Calculate current_new_indices based on linear index 'i' and new_shape
+        int temp_idx = i;
+        for (int d = this->ndim() - 1; d >= 0; --d) {
+            if (new_shape[d] == 0) { // Should be caught by N == 0 if any dim is 0
+                 current_new_indices[d] = 0; // or continue, as this element won't exist
+                 // This case should ideally be handled by N=0 check above if any new_shape[d] is 0.
+            } else {
+                current_new_indices[d] = temp_idx % new_shape[d];
+                temp_idx /= new_shape[d];
+            }
+        }
+
+        for (int j = 0; j < this->ndim(); ++j) {
+            original_indices[axes_order[j]] = current_new_indices[j];
+        }
+
+        new_data[i] = this->get(original_indices);
+    }
+
+    return std::make_shared<Tensor>(new_shape, new_data);
+}
+
 // --- Backward pass ---
-// ... (backward, zero_grad - these were correct) ...
 void Tensor::backward() {
-    if (numel() != 1) {
+    if (numel() != 1 && !(shape.empty() && numel()==1) ) { // Allow scalar identified by empty shape and numel 1
         throw std::runtime_error("Backward on a Tensor can only be called for a scalar (single element) tensor. Numel is " + std::to_string(numel()));
     }
     if (data.empty() || !data[0]) {
@@ -383,10 +574,11 @@ void Tensor::backward() {
 }
 
 void Tensor::backward(const std::shared_ptr<Tensor>& grad) {
+    if (!grad) throw std::runtime_error("Gradient tensor cannot be null for backward(grad).");
     if (this->shape != grad->shape) {
         throw std::runtime_error("Gradient tensor shape must match the original tensor shape for element-wise backward.");
     }
-    if (this->data.size() != grad->data.size()){
+    if (this->data.size() != grad->data.size()){ // Should be redundant if shapes match and numel calculation is correct
         throw std::runtime_error("Data and grad tensor internal data sizes mismatch.");
     }
     for(size_t i=0; i < data.size(); ++i) {
@@ -406,26 +598,27 @@ void Tensor::zero_grad() {
 }
 
 // --- Utility to print the tensor ---
-// ... (print - this was correct) ...
 void Tensor::print(const std::string& title) const {
     if (!title.empty()) {
         std::cout << title << std::endl;
     }
-    if (ndim() == 0 || numel() == 0 && !(shape.empty() && numel()==1) ) { // Adjusted for scalar
+
+    if (shape.empty()) { // Scalar tensor
+         if (numel()==1 && !data.empty() && data[0]) {
+             std::cout << "Tensor scalar: [" << std::fixed << std::setprecision(4) << data[0]->data << "]" << std::endl;
+         } else {
+             std::cout << "Tensor scalar: (empty data)" << std::endl;
+         }
+         return;
+    }
+
+    if (numel() == 0) { // For shapes like {5,0}
         std::cout << "Tensor with shape (";
         for (size_t i = 0; i < shape.size(); ++i) {
             std::cout << shape[i] << (i == shape.size() - 1 ? "" : ", ");
         }
-        std::cout << ") and no data or 0 elements (unless scalar)." << std::endl;
-        if (shape.empty() && numel()==1 && !data.empty() && data[0]) { // Scalar print
-             std::cout << "[" << std::fixed << std::setprecision(4) << data[0]->data << "]" << std::endl;
-        }
+        std::cout << ") and 0 elements." << std::endl;
         return;
-    }
-
-    if (shape.empty() && numel()==1) { // Scalar print
-         std::cout << "[" << std::fixed << std::setprecision(4) << (data[0] ? data[0]->data : NAN) << "]" << std::endl;
-         return;
     }
 
 
@@ -462,7 +655,6 @@ void Tensor::print(const std::string& title) const {
 }
 
 // --- Free operator functions for scalar on the left ---
-// ... (free ops - these were correct) ...
 std::shared_ptr<Tensor> operator+(float scalar, const std::shared_ptr<Tensor>& tensor) {
     if (!tensor) throw std::runtime_error("Input tensor is null for scalar addition.");
     return tensor->operator+(scalar);
@@ -478,7 +670,6 @@ std::shared_ptr<Tensor> operator*(float scalar, const std::shared_ptr<Tensor>& t
 }
 
 // --- Transpose and Statistical methods ---
-// ... (transpose, sum_all, mean_all, var_all - these were correct) ...
 std::shared_ptr<Tensor> Tensor::transpose() const {
     if (ndim() != 2) {
         throw std::runtime_error("Transpose is only supported for 2D tensors (matrices). Current ndim: " + std::to_string(ndim()));
@@ -495,7 +686,12 @@ std::shared_ptr<Tensor> Tensor::transpose() const {
 }
 
 std::shared_ptr<Value> Tensor::sum_all() const {
-    if (data.empty()) return std::make_shared<Value>(0.0f, "sum_empty_tensor");
+    if (data.empty() && !(shape.empty() && numel()==1) ) return std::make_shared<Value>(0.0f, "sum_empty_tensor");
+    if (shape.empty() && numel()==1) { // Scalar tensor
+        if (data.empty() || !data[0]) throw std::runtime_error("Scalar tensor has no data for sum_all.");
+        return data[0]; // Sum of a scalar is the scalar itself
+    }
+
     auto current_sum = std::make_shared<Value>(0.0f, "sum_init");
     for (const auto& val_ptr : data) {
         if (!val_ptr) throw std::runtime_error("Null Value pointer in Tensor during sum_all.");
@@ -506,10 +702,14 @@ std::shared_ptr<Value> Tensor::sum_all() const {
 }
 
 std::shared_ptr<Value> Tensor::mean_all() const {
-    if (data.empty()) return std::make_shared<Value>(0.0f, "mean_empty_tensor");
     int N = numel();
-    if (N == 0 && !shape.empty()) return std::make_shared<Value>(0.0f, "mean_zero_numel_tensor"); // numel is 0 for non-empty shape with 0 dim
-    if (N == 0 && shape.empty()) return std::make_shared<Value>(0.0f, "mean_scalar_zero_numel"); // Should not happen if numel handles scalar as 1
+    if (N == 0 && !shape.empty()) return std::make_shared<Value>(0.0f, "mean_zero_numel_tensor");
+    if (shape.empty() && N==1) { // Scalar tensor
+         if (data.empty() || !data[0]) throw std::runtime_error("Scalar tensor has no data for mean_all.");
+        return data[0]; // Mean of a scalar is the scalar itself
+    }
+    if (data.empty()) return std::make_shared<Value>(0.0f, "mean_empty_data"); // Should be caught by N=0 if shape implies
+
     auto s = this->sum_all();
     s->op = "mean_sum_part";
     auto result = s / std::make_shared<Value>(static_cast<float>(N), "mean_N");
@@ -519,13 +719,11 @@ std::shared_ptr<Value> Tensor::mean_all() const {
 
 std::shared_ptr<Value> Tensor::var_all(bool unbiased) const {
     int N = numel();
-    if (data.empty() || (unbiased && N < 2) || N == 0 && !shape.empty()) { // N can be 0 for non-empty shape like {0,5}
+    if (shape.empty() && N==1) return std::make_shared<Value>(0.0f, "var_scalar"); // Variance of scalar is 0
+
+    if (data.empty() || (unbiased && N < 2) || N == 0 ) {
         return std::make_shared<Value>(0.0f, "var_insufficient_data");
     }
-     if (N == 0 && shape.empty()){ // Should not happen with numel() scalar fix
-        return std::make_shared<Value>(0.0f, "var_scalar_zero_numel");
-     }
-
 
     auto m = this->mean_all();
     m->op = "var_mean_part";

@@ -77,6 +77,8 @@ public:
     std::shared_ptr<Tensor> exp_elem() const;  // Element-wise exp
     std::shared_ptr<Tensor> log_elem() const;  // Element-wise log
     std::shared_ptr<Tensor> log_softmax(int axis = -1) const; // Computes log_softmax over the last dimension
+    std::shared_ptr<Tensor> softmax(int axis = -1) const; // Computes softmax over the specified dimension
+    std::shared_ptr<Tensor> permute(const std::vector<int>& axes_order) const;
 
 private:
     int get_flattened_index(const std::vector<int>& indices) const;

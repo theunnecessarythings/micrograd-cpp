@@ -523,6 +523,228 @@ TEST(NNLayerTest, Conv2DParameters) {
     EXPECT_EQ(conv_no_bias->parameters().size(), 16*3*3*3);
 }
 
+// --- Conv1D Layer Tests ---
+#include "nn/Conv1D.h" // Add include for Conv1D
+
+TEST(NNLayerTest, Conv1DForwardSimple) {
+    // Input: 1x1x5 (N, C_in, L_in), Kernel: 1x1x3 (C_out, C_in, K_L), Output: 1x1x3 (N, C_out, L_out)
+    // Stride=1, Padding=0
+    auto conv_layer = std::make_shared<Conv1D>(1, 1, 3, 1, 0, false); // in_c=1, out_c=1, kernel=3, stride=1, pad=0, no_bias
+
+    // Weights: filter0_channel0 = [1, 2, 3]
+    conv_layer->weights = Tensor::from_vector({1.0f, 2.0f, 3.0f}, {1, 1, 3});
+
+    // Input: batch1_channel0 = [1,1,1,1,1]
+    auto input = Tensor::from_vector({1.0f,1.0f,1.0f,1.0f,1.0f}, {1, 1, 5});
+    auto output = conv_layer->forward(input);
+
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->shape[0], 1); // N
+    EXPECT_EQ(output->shape[1], 1); // C_out
+    EXPECT_EQ(output->shape[2], 3); // L_out = (5-3+0)/1 + 1 = 3
+
+    // Expected output:
+    // O[0] = 1*1 + 1*2 + 1*3 = 1+2+3 = 6
+    // O[1] = 1*1 + 1*2 + 1*3 = 6
+    // O[2] = 1*1 + 1*2 + 1*3 = 6
+    check_tensor_data(output, {6.0f, 6.0f, 6.0f});
+}
+
+TEST(NNLayerTest, Conv1DForwardWithBias) {
+    auto conv_layer = std::make_shared<Conv1D>(1, 1, 2, 1, 0, true); // Use bias, kernel_size=2
+    conv_layer->weights = Tensor::from_vector({1.0f, 0.5f}, {1,1,2}); // W = [1, 0.5]
+    conv_layer->biases = Tensor::from_vector({0.1f}, {1}); // bias for out_channel_0
+
+    auto input = Tensor::from_vector({1.0f,2.0f,3.0f}, {1,1,3}); // Input: [1,2,3]
+    auto output = conv_layer->forward(input); // L_out = (3-2)/1 + 1 = 2
+
+    // O[0] = (1*1 + 2*0.5) + 0.1 = (1+1) + 0.1 = 2.1
+    // O[1] = (2*1 + 3*0.5) + 0.1 = (2+1.5) + 0.1 = 3.5 + 0.1 = 3.6
+    check_tensor_data(output, {2.1f, 3.6f});
+}
+
+TEST(NNLayerTest, Conv1DForwardWithStride) {
+    // Input: 1x1x5, Kernel: 1x1x3, Stride=2, Padding=0, Output: 1x1x2
+    auto conv_layer = std::make_shared<Conv1D>(1, 1, 3, 2, 0, false); // stride=2
+    conv_layer->weights = Tensor::from_vector({1,0,1}, {1,1,3}); // W = [1,0,1]
+    auto input = Tensor::from_vector({1,2,3,4,5}, {1,1,5}); // Input: [1,2,3,4,5]
+    auto output = conv_layer->forward(input);
+
+    ASSERT_EQ(output->shape[2], 2); // L_out = floor((5-3+0)/2)+1 = floor(2/2)+1 = 1+1 = 2
+    // O[0] = (1*1 + 2*0 + 3*1) = 1+0+3 = 4
+    // O[1] (starts at input index 2*1=2) = (3*1 + 4*0 + 5*1) = 3+0+5 = 8
+    check_tensor_data(output, {4.0f, 8.0f});
+}
+
+TEST(NNLayerTest, Conv1DForwardWithPadding) {
+    // Input: 1x1x3, Kernel: 1x1x3, Stride=1, Padding=1, Output: 1x1x3
+    // Padded input becomes effectively length 5: [0, 1, 2, 3, 0]
+    auto conv_layer = std::make_shared<Conv1D>(1, 1, 3, 1, 1, false); // padding=1
+    conv_layer->weights = Tensor::from_vector({1,1,1}, {1,1,3}); // W = [1,1,1]
+    auto input = Tensor::from_vector({1,2,3}, {1,1,3}); // Input: [1,2,3]
+    auto output = conv_layer->forward(input);
+
+    ASSERT_EQ(output->shape[2], 3); // L_out = floor((3-3+2*1)/1)+1 = 2+1=3
+
+    // O[0] (kernel on [0,1,2] of padded input) = 0*1+1*1+2*1 = 3
+    // O[1] (kernel on [1,2,3] of padded input) = 1*1+2*1+3*1 = 6
+    // O[2] (kernel on [2,3,0] of padded input) = 2*1+3*1+0*1 = 5
+    check_tensor_data(output, {3.0f, 6.0f, 5.0f});
+}
+
+TEST(NNLayerTest, Conv1DBackwardSmall) {
+    // Input: 1x1x3, Kernel: 1x1x2 (2 weights), Output: 1x1x2
+    auto conv_layer = std::make_shared<Conv1D>(1, 1, 2, 1, 0, true); // bias=true
+    // Weights w = [w1, w2], Bias b = [b0]
+    conv_layer->weights = Tensor::from_vector({2.0f, 0.5f}, {1,1,2}); // w1=2, w2=0.5
+    conv_layer->biases = Tensor::from_vector({0.1f}, {1}); // b0=0.1
+
+    // Input values x = [x1, x2, x3]
+    auto x1_v = std::make_shared<Value>(1.0f);
+    auto x2_v = std::make_shared<Value>(2.0f);
+    auto x3_v = std::make_shared<Value>(3.0f);
+    auto input_tensor = Tensor::from_values({x1_v,x2_v,x3_v}, {1,1,3});
+
+    auto output_tensor = conv_layer->forward(input_tensor);
+    // Output y = [y1, y2]
+    // y1 = x1*w1 + x2*w2 + b0 = 1*2 + 2*0.5 + 0.1 = 2+1+0.1 = 3.1
+    // y2 = x2*w1 + x3*w2 + b0 = 2*2 + 3*0.5 + 0.1 = 4+1.5+0.1 = 5.6
+
+    // Sum all output elements for a scalar loss L
+    auto loss = output_tensor->get({0,0,0}) + output_tensor->get({0,0,1}); // L = y1+y2 = 3.1+5.6 = 8.7
+    loss->backward();
+
+    // dL/dw1 = x1 + x2 = 1+2 = 3
+    // dL/dw2 = x2 + x3 = 2+3 = 5
+    check_value_grad(conv_layer->weights->get({0,0,0}), 3.0f); // grad for w1
+    check_value_grad(conv_layer->weights->get({0,0,1}), 5.0f); // grad for w2
+    // dL/db0 = N_outputs_summed = 1+1 = 2 (since y1 and y2 both use b0 and are summed)
+    check_value_grad(conv_layer->biases->get({0}), 2.0f);
+    // dL/dx1 = w1 = 2.0
+    // dL/dx2 = w1 (from y1) + w2 (from y2) = 2.0 + 0.5 = 2.5
+    // dL/dx3 = w2 = 0.5
+    check_value_grad(x1_v, 2.0f);
+    check_value_grad(x2_v, 2.5f);
+    check_value_grad(x3_v, 0.5f);
+}
+
+TEST(NNLayerTest, Conv1DParameters) {
+    auto conv_with_bias = std::make_shared<Conv1D>(3,16,3,1,1,true); // in=3, out=16, k=3, bias=true
+    // Weights: 16 * 3 * 3 = 144. Biases: 16. Total = 160
+    EXPECT_EQ(conv_with_bias->parameters().size(), 16*3*3 + 16);
+
+    auto conv_no_bias = std::make_shared<Conv1D>(3,16,3,1,1,false); // bias=false
+    EXPECT_EQ(conv_no_bias->parameters().size(), 16*3*3);
+}
+
+// --- Scaled Dot-Product Attention Tests ---
+#include "nn/attention.h" // Add include for attention functions
+
+TEST(NNLayerTest, ScaledDotProductAttentionForwardSimple) {
+    // Q, K, V: [batch_size=1, seq_len=1, d_k=2]
+    // Q = [[1, 2]], K = [[3, 4]], V = [[5, 6]]
+    // d_k = 2, sqrt(d_k) = 1.41421356
+    auto q_tensor = Tensor::from_vector({1.0f, 2.0f}, {1, 1, 2});
+    auto k_tensor = Tensor::from_vector({3.0f, 4.0f}, {1, 1, 2});
+    auto v_tensor = Tensor::from_vector({5.0f, 6.0f}, {1, 1, 2}); // d_v = 2
+
+    // K.T (manual for single K vector in batch): shape [1,2,1]
+    // Q @ K.T = [1,2] @ [[3],[4]] = 1*3 + 2*4 = 3 + 8 = 11. (Scores shape [1,1,1])
+    // Scaled score = 11 / 1.41421356 = 7.77817
+    // Softmax of a single score is 1.0. (Attention weights shape [1,1,1], value is 1.0)
+    // Output = AttentionWeights @ V.
+    // Matmul: [B, Sq, Sk] @ [B, Sv, Dv] where Sk == Sv. Here Sk=1, Sv=1.
+    // Output = 1.0 * V = [[5,6]] (shape [1,1,2])
+
+    auto output = micrograd_nn::scaled_dot_product_attention(q_tensor, k_tensor, v_tensor);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->shape[0], 1); // N
+    EXPECT_EQ(output->shape[1], 1); // seq_len_q
+    EXPECT_EQ(output->shape[2], 2); // d_v
+    check_tensor_data(output, {5.0f, 6.0f}, 1e-4f);
+}
+
+TEST(NNLayerTest, ScaledDotProductAttentionForwardMultipleKeys) {
+    // Q: [1,1,2] = [[1,0]]
+    // K: [1,2,2] = [[[1,0], [0,1]]] (Key0, Key1)
+    // V: [1,2,2] = [[[0.1,0.2], [0.3,0.4]]] (Value0, Value1)
+    // d_k = 2, scale = 1/sqrt(2) = 0.70710678
+    auto q = Tensor::from_vector({1.0f, 0.0f}, {1,1,2});
+    auto k = Tensor::from_vector({1.0f,0.0f, 0.0f,1.0f}, {1,2,2});
+    auto v = Tensor::from_vector({0.1f,0.2f, 0.3f,0.4f}, {1,2,2});
+
+    // Q @ K.T:
+    // K.T (batch item 0): [[1,0],[0,1]] (shape [2,2] conceptually for slice)
+    // scores_slice = [1,0] @ [[1,0],[0,1]] = [1*1+0*0, 1*0+0*1] = [1, 0]
+    // Scaled_scores_slice = [1*0.70710678, 0*0.70710678] = [0.70710678, 0]
+    // Softmax([0.70710678, 0]):
+    // exp_scores = [exp(0.70710678), exp(0)] = [2.02808, 1.0]
+    // sum_exp = 3.02808
+    // attn_w_slice = [2.02808/3.02808, 1.0/3.02808] = [0.66977, 0.33023] (shape [1,1,2] for this item)
+    // Output_slice = attn_w_slice @ V_slice = [0.66977, 0.33023] @ [[0.1,0.2], [0.3,0.4]]
+    //        = 0.66977 * [0.1,0.2] + 0.33023 * [0.3,0.4]
+    //        = [0.066977, 0.133954] + [0.099069, 0.132092]
+    //        = [0.166046, 0.266046]
+    auto output = micrograd_nn::scaled_dot_product_attention(q, k, v);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->shape[0], 1); // N
+    EXPECT_EQ(output->shape[1], 1); // seq_len_q
+    EXPECT_EQ(output->shape[2], 2); // d_v
+    check_tensor_data(output, {0.166046f, 0.266046f}, 1e-5f);
+}
+
+
+TEST(NNLayerTest, ScaledDotProductAttentionWithMask) {
+    auto q = Tensor::from_vector({1.0f, 0.0f}, {1,1,2});
+    auto k = Tensor::from_vector({1.0f,0.0f, 0.0f,1.0f, 1.0f, 1.0f}, {1,3,2}); // 3 keys
+    auto v = Tensor::from_vector({0.1f,0.2f,  0.3f,0.4f,  0.5f,0.6f}, {1,3,2}); // 3 values
+    // Mask out the second key/value pair. Mask shape [1,1,3] (N, Sq, Sk)
+    // Mask value of 1.0 means mask it (set to large negative before softmax)
+    auto mask = Tensor::from_vector({0.0f, 1.0f, 0.0f}, {1,1,3});
+
+    // Q = [1,0], scale = 0.70710678
+    // K0=[1,0], K1=[0,1], K2=[1,1]
+    // Scores before scaling: Q@K0.T=1, Q@K1.T=0, Q@K2.T=1
+    // Scaled scores: [0.70710678, 0, 0.70710678]
+    // Masked scores (add -1e9 to where mask is 1.0): [0.70710678, -1e9, 0.70710678]
+    // Softmax of this will give very low weight to middle element.
+    // exp_scores approx [exp(0.70710678), 0, exp(0.70710678)] = [2.02808, 0, 2.02808]
+    // sum_exp approx 4.05616
+    // attn_w approx [0.5, 0, 0.5] (actually 2.02808/4.05616 = 0.49999)
+    // Output = 0.5*V0 + 0*V1 + 0.5*V2
+    //        = 0.5*[0.1,0.2] + 0.5*[0.5,0.6]
+    //        = [0.05, 0.1] + [0.25, 0.3]
+    //        = [0.3, 0.4]
+    auto output = micrograd_nn::scaled_dot_product_attention(q, k, v, mask);
+    check_tensor_data(output, {0.3f, 0.4f}, 1e-5f); // Using 1e-5 due to softmax precision
+}
+
+TEST(NNLayerTest, ScaledDotProductAttentionBackward) {
+    // Q, K, V: [1,1,1], all Value(1.0)
+    auto q_val = std::make_shared<Value>(1.0f);
+    auto k_val = std::make_shared<Value>(1.0f);
+    auto v_val = std::make_shared<Value>(1.0f); // d_v = 1
+
+    auto q_tensor = Tensor::from_values({q_val}, {1,1,1}); // d_k = 1
+    auto k_tensor = Tensor::from_values({k_val}, {1,1,1});
+    auto v_tensor = Tensor::from_values({v_val}, {1,1,1});
+
+    // Q@K.T = 1*1 = 1. sqrt(d_k)=1. Scaled_score=1. Softmax(1)=1. Output = 1*V = 1.
+    auto output_tensor = micrograd_nn::scaled_dot_product_attention(q_tensor, k_tensor, v_tensor);
+    auto loss = output_tensor->get({0,0,0}); // Loss is the single output value
+    ASSERT_NE(loss, nullptr);
+    loss->backward();
+
+    // Check if grads are non-zero (exact values are complex for full SDPA)
+    // For this specific case (Q,K,V are all 1.0, d_k=1), dL/dQ and dL/dK are 0.
+    EXPECT_NEAR(q_val->grad, 0.0f, 1e-4f);
+    EXPECT_NEAR(k_val->grad, 0.0f, 1e-4f);
+    EXPECT_NE(v_val->grad, 0.0f); // Should still be non-zero
+
+    // Simple check for V's gradient: dL/dV = AttentionWeight. Here, AttentionWeight is 1. So dL/dV = 1.
+    EXPECT_NEAR(v_val->grad, 1.0f, 1e-4f);
+}
+
 
 // Main function for Google Test
 int main(int argc, char **argv) {
