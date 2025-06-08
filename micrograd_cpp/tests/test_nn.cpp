@@ -12,6 +12,12 @@
 #include <vector>
 #include <cmath> // For std::exp, std::fabs
 
+// Helper function to check gradients of Value objects
+void check_value_grad(const std::shared_ptr<Value>& val, float expected_grad, float tol = 1e-4) {
+    ASSERT_NE(val, nullptr);
+    EXPECT_NEAR(val->grad, expected_grad, tol);
+}
+
 // Helper function to check gradients of all Value objects in a Tensor
 void check_tensor_grads(const std::shared_ptr<Tensor>& tensor, const std::vector<float>& expected_grads, float tol = 1e-4) {
     ASSERT_NE(tensor, nullptr);
@@ -391,6 +397,130 @@ TEST(NNLayerTest, RMSNormBackward) {
 TEST(NNLayerTest, RMSNormParameters) {
     auto rms_layer = std::make_shared<RMSNorm>(20); // 20 features
     EXPECT_EQ(rms_layer->parameters().size(), 20); // Only gamma parameters
+}
+
+// --- Conv2D Layer Tests ---
+#include "nn/Conv2D.h" // Add include for Conv2D
+
+TEST(NNLayerTest, Conv2DForwardSimple) {
+    // Input: 1x1x3x3, Kernel: 1x1x2x2, Output: 1x1x2x2
+    // Stride=1, Padding=0
+    auto conv_layer = std::make_shared<Conv2D>(1, 1, 2, 1, 0, false); // in_c=1, out_c=1, kernel=2, stride=1, pad=0, no_bias
+
+    // Weights: filter0_channel0 = [[1, 2], [3, 4]]
+    conv_layer->weights = Tensor::from_vector({1.0f, 2.0f, 3.0f, 4.0f}, {1, 1, 2, 2});
+
+    // Input: batch1_channel0 = [[1,1,1], [1,1,1], [1,1,1]]
+    auto input = Tensor::from_vector({1,1,1, 1,1,1, 1,1,1}, {1, 1, 3, 3});
+    auto output = conv_layer->forward(input);
+
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->shape[0], 1); // N
+    EXPECT_EQ(output->shape[1], 1); // C_out
+    EXPECT_EQ(output->shape[2], 2); // H_out
+    EXPECT_EQ(output->shape[3], 2); // W_out
+
+    // Expected output:
+    // O[0,0] = 1*1 + 1*2 + 1*3 + 1*4 = 1+2+3+4 = 10
+    // O[0,1] = 1*1 + 1*2 + 1*3 + 1*4 = 10
+    // O[1,0] = 1*1 + 1*2 + 1*3 + 1*4 = 10
+    // O[1,1] = 1*1 + 1*2 + 1*3 + 1*4 = 10
+    check_tensor_data(output, {10.0f, 10.0f, 10.0f, 10.0f});
+}
+
+TEST(NNLayerTest, Conv2DForwardWithBias) {
+    auto conv_layer = std::make_shared<Conv2D>(1, 1, 2, 1, 0, true); // Use bias
+    conv_layer->weights = Tensor::from_vector({1,0,0,1}, {1,1,2,2}); // [[1,0],[0,1]]
+    conv_layer->biases = Tensor::from_vector({0.5f}, {1}); // bias for out_channel_0
+
+    auto input = Tensor::from_vector({1,2,3, 1,1,1, 2,2,2}, {1,1,3,3}); // [[1,2,3],[1,1,1],[2,2,2]]
+    auto output = conv_layer->forward(input);
+
+    // O[0,0] = (1*1 + 2*0 + 1*0 + 1*1) + 0.5 = (1+0+0+1) + 0.5 = 2 + 0.5 = 2.5
+    // O[0,1] = (2*1 + 3*0 + 1*0 + 1*1) + 0.5 = (2+0+0+1) + 0.5 = 3 + 0.5 = 3.5
+    // O[1,0] = (1*1 + 1*0 + 2*0 + 2*1) + 0.5 = (1+0+0+2) + 0.5 = 3 + 0.5 = 3.5
+    // O[1,1] = (1*1 + 1*0 + 2*0 + 2*1) + 0.5 = (1+0+0+2) + 0.5 = 3 + 0.5 = 3.5
+    check_tensor_data(output, {2.5f, 3.5f, 3.5f, 3.5f});
+}
+
+TEST(NNLayerTest, Conv2DForwardWithStride) {
+    // Input: 1x1x3x3, Kernel: 1x1x2x2, Stride=2, Padding=0, Output: 1x1x1x1
+    auto conv_layer = std::make_shared<Conv2D>(1, 1, 2, 2, 0, false); // stride=2
+    conv_layer->weights = Tensor::from_vector({1,2,3,4}, {1,1,2,2});
+    auto input = Tensor::from_vector({1,1,1,1,1,1,1,1,1}, {1,1,3,3});
+    auto output = conv_layer->forward(input);
+
+    ASSERT_EQ(output->shape[2], 1); // H_out = floor((3-2+0)/2)+1 = floor(1/2)+1 = 0+1 = 1
+    ASSERT_EQ(output->shape[3], 1); // W_out
+    // O[0,0] = 1*1+1*2+1*3+1*4 = 10
+    check_tensor_data(output, {10.0f});
+}
+
+TEST(NNLayerTest, Conv2DForwardWithPadding) {
+    // Input: 1x1x2x2, Kernel: 1x1x2x2, Stride=1, Padding=1, Output: 1x1x3x3
+    auto conv_layer = std::make_shared<Conv2D>(1, 1, 2, 1, 1, false); // padding=1
+    conv_layer->weights = Tensor::from_vector({1,1,1,1}, {1,1,2,2}); // W = [[1,1],[1,1]]
+    auto input = Tensor::from_vector({1,2,3,4}, {1,1,2,2}); // data: 1 (0,0), 2 (0,1), 3 (1,0), 4 (1,1)
+    auto output = conv_layer->forward(input);
+
+    ASSERT_EQ(output->shape[2], 3); // H_out = floor((2-2+2*1)/1)+1 = 2+1=3
+    ASSERT_EQ(output->shape[3], 3); // W_out
+
+    // Expected values based on manual calculation with padding:
+    // Padded input conceptually:
+    // 0 0 0 0
+    // 0 1 2 0
+    // 0 3 4 0
+    // 0 0 0 0
+    // Kernel [[1,1],[1,1]]
+    // O[0,0] = 0*1+0*1+0*1+1*1 = 1
+    // O[0,1] = 0*1+0*1+1*1+2*1 = 3
+    // O[0,2] = 0*1+0*1+2*1+0*1 = 2
+    // O[1,0] = 0*1+1*1+0*1+3*1 = 4
+    // O[1,1] = 1*1+2*1+3*1+4*1 = 10
+    // O[1,2] = 2*1+0*1+4*1+0*1 = 6
+    // O[2,0] = 0*1+3*1+0*1+0*1 = 3
+    // O[2,1] = 3*1+4*1+0*1+0*1 = 7
+    // O[2,2] = 4*1+0*1+0*1+0*1 = 4
+    std::vector<float> expected = {
+        1.0f,  3.0f,  2.0f,
+        4.0f, 10.0f,  6.0f,
+        3.0f,  7.0f,  4.0f
+    };
+    check_tensor_data(output, expected);
+}
+
+TEST(NNLayerTest, Conv2DBackwardSmall) {
+    auto conv_layer = std::make_shared<Conv2D>(1, 1, 1, 1, 0, true);
+    conv_layer->weights = Tensor::from_vector({2.0f}, {1,1,1,1});
+    conv_layer->biases = Tensor::from_vector({0.5f}, {1});
+
+    auto x1 = std::make_shared<Value>(1.0f); auto x2 = std::make_shared<Value>(2.0f);
+    auto x3 = std::make_shared<Value>(3.0f); auto x4 = std::make_shared<Value>(4.0f);
+    auto input_tensor = Tensor::from_values({x1,x2,x3,x4}, {1,1,2,2});
+
+    auto output_tensor = conv_layer->forward(input_tensor);
+
+    auto loss = std::make_shared<Value>(0.0f);
+    for(const auto& val_ptr : output_tensor->data) {
+        loss = loss + val_ptr;
+    }
+    loss->backward();
+
+    check_value_grad(conv_layer->weights->data[0], 10.0f);
+    check_value_grad(conv_layer->biases->data[0], 4.0f);
+    check_value_grad(x1, 2.0f);
+    check_value_grad(x2, 2.0f);
+    check_value_grad(x3, 2.0f);
+    check_value_grad(x4, 2.0f);
+}
+
+TEST(NNLayerTest, Conv2DParameters) {
+    auto conv_with_bias = std::make_shared<Conv2D>(3,16,3,1,1,true);
+    EXPECT_EQ(conv_with_bias->parameters().size(), 16*3*3*3 + 16);
+
+    auto conv_no_bias = std::make_shared<Conv2D>(3,16,3,1,1,false);
+    EXPECT_EQ(conv_no_bias->parameters().size(), 16*3*3*3);
 }
 
 

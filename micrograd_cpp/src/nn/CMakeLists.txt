@@ -7,6 +7,8 @@ set(NN_SOURCES
     RMSNorm.cpp
     losses.cpp
     metrics.cpp
+    Conv2D.cpp
+    Conv1D.cpp
 )
 
 # Using STATIC library for nn module as it's likely to be small and specific to this project
